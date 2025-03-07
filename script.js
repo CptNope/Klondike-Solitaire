@@ -1,0 +1,443 @@
+    /**********************
+     * CONSTANTS & SETTINGS
+     **********************/
+    const CARD_WIDTH = 60;
+    const CARD_HEIGHT = 90;
+    const PADDING = 20;
+    // Pile positions
+    const STOCK_POS = { x: 50, y: 50 };
+    const WASTE_POS = { x: STOCK_POS.x + CARD_WIDTH + PADDING, y: 50 };
+    const FOUNDATION_POS = [
+      { x: 350, y: 50 },
+      { x: 350 + CARD_WIDTH + PADDING, y: 50 },
+      { x: 350 + 2*(CARD_WIDTH + PADDING), y: 50 },
+      { x: 350 + 3*(CARD_WIDTH + PADDING), y: 50 }
+    ];
+    const TABLEAU_START = { x: 50, y: 200 };
+    const TABLEAU_GAP_X = CARD_WIDTH + PADDING;
+    const TABLEAU_GAP_Y = 30; // vertical offset for tableau cards
+
+    // Suits, ranks and color
+    const SUITS = ["♣", "♦", "♥", "♠"];
+    const RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+    function isRed(suit) { return suit === "♦" || suit === "♥"; }
+
+    /**********************
+     * GAME STATE
+     **********************/
+    let deck = [];
+    let stock = [];
+    let waste = [];
+    let foundations = [[], [], [], []]; // 4 foundation piles
+    let tableau = [[], [], [], [], [], [], []]; // 7 tableau columns
+
+    // Drag state (for moving cards)
+    let dragState = {
+      selectedCards: null, // array of cards being dragged
+      sourcePile: null,    // the pile array from which they came
+      offsetX: 0,
+      offsetY: 0
+    };
+
+    // Canvas and context
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    /**********************
+     * CARD OBJECT DEFINITION
+     **********************/
+    // Each card is an object:
+    // { suit, rank, color, faceUp }
+    // We compute drawing positions based on its pile and index.
+    
+    /**********************
+     * INITIALIZATION FUNCTIONS
+     **********************/
+    function initDeck() {
+      deck = [];
+      for (let suit of SUITS) {
+        for (let rank of RANKS) {
+          deck.push({
+            suit: suit,
+            rank: rank,
+            color: isRed(suit) ? "red" : "black",
+            faceUp: false
+          });
+        }
+      }
+    }
+
+    // Fisher-Yates shuffle
+    function shuffleDeck(array) {
+      for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+    }
+
+    // Deal: Tableau columns (col i gets i+1 cards; only top card is faceUp)
+    // Remaining cards go to stock (faceDown).
+    function deal() {
+      stock = [];
+      waste = [];
+      foundations = [[], [], [], []];
+      tableau = [[], [], [], [], [], [], []];
+
+      initDeck();
+      shuffleDeck(deck);
+
+      for (let col = 0; col < 7; col++) {
+        for (let row = 0; row <= col; row++) {
+          let card = deck.pop();
+          card.faceUp = (row === col);
+          tableau[col].push(card);
+        }
+      }
+      while (deck.length) {
+        let card = deck.pop();
+        card.faceUp = false;
+        stock.push(card);
+      }
+    }
+
+    /**********************
+     * DRAWING FUNCTIONS
+     **********************/
+    // Draw a single card at (x,y)
+    function drawCard(card, x, y) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.strokeStyle = "black";
+      ctx.lineWidth = 2;
+      if (card.faceUp) {
+        // Card front: white background with thick black border and rank/suit text.
+        ctx.fillStyle = "white";
+        ctx.fillRect(0, 0, CARD_WIDTH, CARD_HEIGHT);
+        ctx.strokeRect(0, 0, CARD_WIDTH, CARD_HEIGHT);
+        ctx.fillStyle = card.color;
+        ctx.font = "20px Arial";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(card.rank + card.suit, CARD_WIDTH/2, CARD_HEIGHT/2);
+      } else {
+        // Card back: blue with a simple checker pattern.
+        ctx.fillStyle = "#0033cc";
+        ctx.fillRect(0, 0, CARD_WIDTH, CARD_HEIGHT);
+        ctx.strokeRect(0, 0, CARD_WIDTH, CARD_HEIGHT);
+        ctx.fillStyle = "#ffffff";
+        for (let yPos = 0; yPos < CARD_HEIGHT; yPos += 15) {
+          for (let xPos = 0; xPos < CARD_WIDTH; xPos += 15) {
+            if (((xPos + yPos) / 15) % 2 < 1) {
+              ctx.fillRect(xPos, yPos, 7, 7);
+            }
+          }
+        }
+      }
+      ctx.restore();
+    }
+
+    // The drawGame function draws non-dragged cards first,
+    // then draws any cards currently being dragged (from dragState) on top.
+    function drawGame() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw stock
+      if (stock.length > 0) {
+        drawCard({ faceUp: false }, STOCK_POS.x, STOCK_POS.y);
+      } else {
+        ctx.strokeStyle = "white";
+        ctx.strokeRect(STOCK_POS.x, STOCK_POS.y, CARD_WIDTH, CARD_HEIGHT);
+      }
+
+      // Draw waste
+      if (waste.length > 0) {
+        let card = waste[waste.length - 1];
+        drawCard(card, WASTE_POS.x, WASTE_POS.y);
+      } else {
+        ctx.strokeStyle = "white";
+        ctx.strokeRect(WASTE_POS.x, WASTE_POS.y, CARD_WIDTH, CARD_HEIGHT);
+      }
+
+      // Draw foundations
+      for (let i = 0; i < 4; i++) {
+        let pos = FOUNDATION_POS[i];
+        if (foundations[i].length > 0) {
+          let card = foundations[i][foundations[i].length - 1];
+          drawCard(card, pos.x, pos.y);
+        } else {
+          ctx.strokeStyle = "white";
+          ctx.strokeRect(pos.x, pos.y, CARD_WIDTH, CARD_HEIGHT);
+        }
+      }
+
+      // Draw tableau (non-dragged cards)
+      for (let col = 0; col < 7; col++) {
+        let baseX = TABLEAU_START.x + col * TABLEAU_GAP_X;
+        let pile = tableau[col];
+        for (let row = 0; row < pile.length; row++) {
+          let card = pile[row];
+          // If this card is being dragged (has dragPos), skip drawing here.
+          if (card.dragPos) continue;
+          let x = baseX;
+          let y = TABLEAU_START.y + row * TABLEAU_GAP_Y;
+          drawCard(card, x, y);
+          card.drawX = x;
+          card.drawY = y;
+        }
+      }
+
+      // Draw dragged cards on top (if any)
+      if (dragState.selectedCards) {
+        for (let i = 0; i < dragState.selectedCards.length; i++) {
+          let card = dragState.selectedCards[i];
+          if (card.dragPos) {
+            drawCard(card, card.dragPos.x, card.dragPos.y);
+          }
+        }
+      }
+    }
+
+    /**********************
+     * DRAG & DROP HANDLING
+     **********************/
+    function getMousePos(evt) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: evt.clientX - rect.left,
+        y: evt.clientY - rect.top
+      };
+    }
+
+    // Returns the index (in a tableau pile) of the card that was clicked, or -1 if none.
+    function getCardIndexInPile(pile, x, y) {
+      for (let i = pile.length - 1; i >= 0; i--) {
+        let card = pile[i];
+        if (x >= card.drawX && x <= card.drawX + CARD_WIDTH &&
+            y >= card.drawY && y <= card.drawY + CARD_HEIGHT) {
+          return i;
+        }
+      }
+      return -1;
+    }
+
+    canvas.addEventListener("mousedown", function(evt) {
+      const pos = getMousePos(evt);
+      // Check if clicked on stock to flip card
+      if (pos.x >= STOCK_POS.x && pos.x <= STOCK_POS.x + CARD_WIDTH &&
+          pos.y >= STOCK_POS.y && pos.y <= STOCK_POS.y + CARD_HEIGHT) {
+        handleStockClick();
+        drawGame();
+        return;
+      }
+      // Check if clicked on waste (only top card is draggable)
+      if (waste.length > 0 &&
+          pos.x >= WASTE_POS.x && pos.x <= WASTE_POS.x + CARD_WIDTH &&
+          pos.y >= WASTE_POS.y && pos.y <= WASTE_POS.y + CARD_HEIGHT) {
+        dragState.selectedCards = [waste[waste.length - 1]];
+        dragState.sourcePile = waste;
+        dragState.offsetX = pos.x - WASTE_POS.x;
+        dragState.offsetY = pos.y - WASTE_POS.y;
+        drawGame();
+        return;
+      }
+      // Check tableau columns
+      for (let col = 0; col < 7; col++) {
+        let pile = tableau[col];
+        let baseX = TABLEAU_START.x + col * TABLEAU_GAP_X;
+        let index = getCardIndexInPile(pile, pos.x, pos.y);
+        if (index !== -1) {
+          // Only allow dragging if the clicked card is faceUp.
+          if (pile[index].faceUp) {
+            // Drag the entire substack from that card downward.
+            dragState.selectedCards = pile.slice(index);
+            dragState.sourcePile = pile;
+            dragState.offsetX = pos.x - pile[index].drawX;
+            dragState.offsetY = pos.y - pile[index].drawY;
+            break;
+          }
+        }
+      }
+      drawGame();
+    });
+
+    canvas.addEventListener("mousemove", function(evt) {
+      if (dragState.selectedCards) {
+        const pos = getMousePos(evt);
+        // Update the drag positions for each card in the selected substack.
+        for (let i = 0; i < dragState.selectedCards.length; i++) {
+          let card = dragState.selectedCards[i];
+          card.dragPos = {
+            x: pos.x - dragState.offsetX,
+            y: pos.y - dragState.offsetY + i * TABLEAU_GAP_Y
+          };
+        }
+        drawGame();
+      }
+    });
+
+    canvas.addEventListener("mouseup", function(evt) {
+      if (dragState.selectedCards) {
+        const pos = getMousePos(evt);
+        let moveMade = false;
+        // Check if dropped on a tableau pile
+        for (let col = 0; col < 7; col++) {
+          let targetPile = tableau[col];
+          let baseX = TABLEAU_START.x + col * TABLEAU_GAP_X;
+          let targetY = TABLEAU_START.y + targetPile.length * TABLEAU_GAP_Y;
+          if (pos.x >= baseX && pos.x <= baseX + CARD_WIDTH &&
+              pos.y >= targetY && pos.y <= targetY + CARD_HEIGHT) {
+            if (isValidTableauMove(dragState.selectedCards, targetPile)) {
+              moveSubstack(dragState.selectedCards, dragState.sourcePile, targetPile);
+              moveMade = true;
+              break;
+            }
+          }
+        }
+        // Check if dropped on a foundation (only for single-card moves)
+        if (!moveMade && dragState.selectedCards.length === 1) {
+          for (let i = 0; i < 4; i++) {
+            let posF = FOUNDATION_POS[i];
+            if (pos.x >= posF.x && pos.x <= posF.x + CARD_WIDTH &&
+                pos.y >= posF.y && pos.y <= posF.y + CARD_HEIGHT) {
+              if (isValidFoundationMove(dragState.selectedCards[0], foundations[i])) {
+                moveCardToFoundation(dragState.selectedCards[0], dragState.sourcePile, foundations[i]);
+                moveMade = true;
+                break;
+              }
+            }
+          }
+        }
+        // If move is not valid, remove dragPos so cards snap back.
+        dragState.selectedCards.forEach(card => delete card.dragPos);
+        dragState.selectedCards = null;
+        dragState.sourcePile = null;
+        autoFlipTopCards();
+        drawGame();
+      }
+    });
+
+    /**********************
+     * MOVE & VALIDATION FUNCTIONS
+     **********************/
+    // Tableau move validation: if target is empty, only allow a King.
+    // Otherwise, the moving card must be one rank lower and opposite color than the target's top card.
+    function isValidTableauMove(movingCards, targetPile) {
+      let movingCard = movingCards[0];
+      if (targetPile.length === 0) {
+        return movingCard.rank === "K";
+      } else {
+        let targetCard = targetPile[targetPile.length - 1];
+        let targetIndex = RANKS.indexOf(targetCard.rank);
+        let movingIndex = RANKS.indexOf(movingCard.rank);
+        return (movingIndex === targetIndex - 1) && (targetCard.color !== movingCard.color);
+      }
+    }
+
+    // Foundation move validation: only single card moves allowed.
+    // If foundation is empty, only an Ace is allowed; otherwise, the card must be the next rank (same suit).
+    function isValidFoundationMove(card, foundationPile) {
+      if (foundationPile.length === 0) {
+        return card.rank === "A";
+      } else {
+        let topCard = foundationPile[foundationPile.length - 1];
+        let topIndex = RANKS.indexOf(topCard.rank);
+        let cardIndex = RANKS.indexOf(card.rank);
+        return (card.suit === topCard.suit) && (cardIndex === topIndex + 1);
+      }
+    }
+
+    function moveSubstack(movingCards, sourcePile, targetPile) {
+      let index = sourcePile.indexOf(movingCards[0]);
+      let substack = sourcePile.splice(index);
+      targetPile.push(...substack);
+    }
+
+    function moveCardToFoundation(card, sourcePile, foundationPile) {
+      let index = sourcePile.indexOf(card);
+      if (index !== -1) {
+        sourcePile.splice(index, 1);
+      }
+      foundationPile.push(card);
+    }
+
+    // After moving, if the new top card of a tableau pile is faceDown, flip it.
+    function autoFlipTopCards() {
+      for (let col = 0; col < 7; col++) {
+        let pile = tableau[col];
+        if (pile.length > 0) {
+          let topCard = pile[pile.length - 1];
+          if (!topCard.faceUp) {
+            topCard.faceUp = true;
+          }
+        }
+      }
+    }
+
+    // Handle stock clicks: if stock is non-empty, move top card to waste (faceUp).
+    // Otherwise, recycle waste to stock (faceDown).
+    function handleStockClick() {
+      if (stock.length > 0) {
+        let card = stock.pop();
+        card.faceUp = true;
+        waste.push(card);
+      } else {
+        while (waste.length > 0) {
+          let card = waste.pop();
+          card.faceUp = false;
+          stock.push(card);
+        }
+      }
+    }
+
+    /**********************
+     * GAME LOOP
+     **********************/
+    function gameLoop() {
+      drawGame();
+      requestAnimationFrame(gameLoop);
+    }
+
+    /**********************
+     * UI / DEBUG CONTROLS
+     **********************/
+    document.getElementById("restartButton").addEventListener("click", () => {
+      deal();
+      drawGame();
+    });
+
+    document.getElementById("hintButton").addEventListener("click", () => {
+      let hint = getHint();
+      alert(hint || "No valid moves found.");
+    });
+
+    // A very simple hint function.
+    function getHint() {
+      // Check waste -> foundation
+      if (waste.length > 0) {
+        let topWaste = waste[waste.length - 1];
+        for (let i = 0; i < 4; i++) {
+          if (isValidFoundationMove(topWaste, foundations[i])) {
+            return `Hint: Move ${topWaste.rank}${topWaste.suit} from Waste to Foundation ${i+1}`;
+          }
+        }
+      }
+      // Check tableau moves (only top card moves for now)
+      for (let col = 0; col < 7; col++) {
+        let pile = tableau[col];
+        if (pile.length === 0) continue;
+        let topCard = pile[pile.length - 1];
+        for (let dest = 0; dest < 7; dest++) {
+          if (col === dest) continue;
+          if (isValidTableauMove([topCard], tableau[dest])) {
+            return `Hint: Move ${topCard.rank}${topCard.suit} from Tableau ${col+1} to Tableau ${dest+1}`;
+          }
+        }
+      }
+      return null;
+    }
+
+    /**********************
+     * START GAME
+     **********************/
+    deal();
+    gameLoop();
